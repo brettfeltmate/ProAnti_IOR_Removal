@@ -3,12 +3,16 @@
 __author__ = "Brett Feltmate"
 
 import klibs
+import sdl2
 from klibs import P
 from klibs.KLConstants import STROKE_CENTER, CIRCLE_BOUNDARY
 from klibs.KLUtilities import deg_to_px
 from klibs.KLGraphics import KLDraw as kld
+from klibs.KLGraphics import fill, blit, flip
 from klibs.KLCommunication import message
 from klibs.KLBoundary import BoundaryInspector
+from klibs.KLResponseCollectors import KeyMap, KeyPressResponse
+from random import shuffle
 
 import ExpAssets.Resources.code.KLAudio as kla
 
@@ -17,6 +21,20 @@ BLACK = (0, 0, 0, 255)
 WHITE = (255, 255, 255, 255)
 GRAY = (45, 45, 45, 255)
 
+THICKNESS = 'thickness'
+BOX = 'box'
+FIX = 'fix'
+CUE = 'cue'
+FIX_BORDER = 'fix_border'
+FIXATION = 'fixation'
+TARGET = 'target'
+TARG_X = 'x'
+TARG_CROSS = 'cross'
+TARG_BORDER = 'targ_border'
+LEFT = 'left'
+RIGHT = 'right'
+
+
 class ProAnti_IOR_Removal(klibs.Experiment):
 
 	def setup(self):
@@ -24,100 +42,78 @@ class ProAnti_IOR_Removal(klibs.Experiment):
 		# Useful coordinates
 		offset = deg_to_px(6.2)
 		self.locs = {
-			'fix': P.screen_c,
-			'left': (P.screen_c[0] - offset, P.screen_c[1]),
-			'right': (P.screen_c[0] + offset, P.screen_c[1]),
+			FIX: P.screen_c,
+			LEFT: (P.screen_c[0] - offset, P.screen_c[1]),
+			RIGHT: (P.screen_c[0] + offset, P.screen_c[1]),
 		}
 
 		# Stimulus sizing properties
 		self.stim_sizes = {
-			'box': deg_to_px(1.5),
-			'fix': deg_to_px(0.5),
-			'circle': deg_to_px(0.9),
-			'target': deg_to_px(1.3),
-			'thickness': deg_to_px(0.1)
+			BOX: deg_to_px(1.5),
+			FIX: deg_to_px(0.5),
+			CUE: deg_to_px(0.5),
+			FIX_BORDER: deg_to_px(0.9),
+			TARGET: deg_to_px(1.3),
+			THICKNESS: deg_to_px(0.1)
 		}
 
 		# Visual assets
-		stroke = [STROKE_CENTER, self.stim_sizes['thickness'], BLACK]
+		stroke = [STROKE_CENTER, self.stim_sizes[THICKNESS], BLACK]
+
+
+		self.placeholders = {
+			LEFT: kld.Rectangle(width=self.stim_sizes[BOX], stroke=stroke, fill=WHITE),
+			FIX: kld.Rectangle(width=self.stim_sizes[BOX], stroke=stroke, fill=WHITE),
+			RIGHT: kld.Rectangle(width=self.stim_sizes[BOX], stroke=stroke, fill=WHITE),
+		}
+
 		self.stimuli = {
-			'fixation': kld.FixationCross(size=self.stim_sizes['fix'], thickness=self.stim_sizes['thickness'], fill=BLACK),
-			'fix_circ': kld.Ellipse(width=self.stim_sizes['circle'], stroke=stroke),
-			'target': kld.FixationCross(size=self.stim_sizes['target'], thickness=self.stim_sizes['thickness'], fill=BLACK),
-			'targ_circ': kld.Ellipse(width=self.stim_sizes['target'], stroke=stroke)
+			FIXATION: kld.FixationCross(size=self.stim_sizes[FIX], thickness=self.stim_sizes[THICKNESS], fill=BLACK),
+			FIX_BORDER: kld.Ellipse(width=self.stim_sizes[FIX_BORDER], stroke=stroke),
+			CUE: kld.Asterisk(size=self.stim_sizes[CUE], thickness=self.stim_sizes[THICKNESS], fill=BLACK),
+			TARG_CROSS: kld.FixationCross(size=self.stim_sizes[TARGET], thickness=self.stim_sizes[THICKNESS], fill=BLACK),
+			TARG_X: kld.FixationCross(size=self.stim_sizes[TARGET], thickness=self.stim_sizes[THICKNESS], fill=BLACK, rotation=45),
+			TARG_BORDER: kld.Ellipse(width=self.stim_sizes[TARGET], stroke=stroke)
 		}
 
 
 
 		# Eyelink boundaries for gaze/saccade monitoring
-		radius = self.stim_sizes['box'] / 2.0 # radius of boundary, 1/2 width of placeholder
+		radius = self.stim_sizes[BOX] / 2.0 # radius of boundary, 1/2 width of placeholder
 		self.bi = BoundaryInspector()  # Inspector class
-		for loc in ['left', 'fix', 'right']:
+		for loc in [LEFT, FIX, RIGHT]:
 			self.bi.add_boundary(label=loc, bounds=(self.locs[loc], radius), shape=CIRCLE_BOUNDARY)
 
 		# Spawn tone object to play when drift correct fails
 		self.drift_fail_alert = kla.Tone(duration=60, frequency=2000, fade_in=10, fade_out=10)
 
 
-		# Error messages
-		self.messages = {
-			'saccade_error': message("saccade error", location=self.locs['fix'], registration=5),
-			'saccade_early': message("saccade early", location=self.locs['fix'], registration=5)
+		'''
+		Error messages
+		
+		- pre-cue saccade
+		- wrong saccade to/from cue*
+		- failure to saccade to/from cue before CB
+		- failure to saccade to fix before targ
+		
+		* procedurally construct string, respecting pro/anti condition
+		'''
+
+		self.error_messages = {
+			'saccade_error': message("saccade error", location=self.locs[FIX], registration=5),
+			'saccade_early': message("saccade early", location=self.locs[FIX], registration=5)
 		}
 
 
 
 
+		self.keymap = KeyMap(
+			'key_response',
+			['z', '/'],
+			['z', '/'],
+			[sdl2.SDLK_z, sdl2.SDLK_BACKSLASH]
+		)
 
-
-
-
-
-
-
-
-
-
-		"""
-		locs
-			screen centre
-			peripherals
-
-		Placeholders:
-			gaze boundary boxes
-				1.5 dva
-				white fill, cued by graying
-				1 at fix, 2 flanking by 6.2
-			fix stimuli
-				cross
-					0.5 dva
-					black
-					centered in fix box
-				black circle
-					0.9 dva
-					black
-					centered on fixation
-			targets
-				1.3 dva
-				black
-				composed of encircled cross or x
-
-		tone
-			2000hz sine
-			210ms
-
-		response collector
-			keyboard
-			/ or z
-			mapped to identity
-			counter balanced
-
-
-
-		:return:
-		"""
-
-		pass
 
 	def block(self):
 		"""
@@ -142,6 +138,9 @@ class ProAnti_IOR_Removal(klibs.Experiment):
 		pass
 
 	def trial_prep(self):
+
+
+
 		"""
 		set up events
 			get cue loc
@@ -188,6 +187,29 @@ class ProAnti_IOR_Removal(klibs.Experiment):
 
 	def clean_up(self):
 		pass
+
+	def present_display(self, trial_state=None, show_placeholders=True):
+		fill()
+
+		blit(self.placeholders[FIX], location=self.locs[FIX], registration=5)
+		blit(self.stimuli[FIXATION], location=self.locs[FIX], registration=5)
+
+		if trial_state != 'drift_correct':
+			blit(self.stimuli[FIX_BORDER], location=self.locs[FIX], registration=5)
+
+		if show_placeholders:
+			for loc in [LEFT, RIGHT]:
+				blit(self.placeholders[loc], location=self.locs[loc], registration=5)
+
+		if trial_state == 'cue_on':
+			blit(self.stimuli[CUE], location=self.locs[self.cue_loc], registration=5)
+
+		if trial_state == 'target_on':
+			blit(self.stimuli[self.target_type], location=self.locs[self.target_loc], registration=5)
+			blit(self.stimuli[TARG_BORDER], location=self.locs[self.target_loc], registration=5)
+
+		flip()
+
 
 	def drift_correct(self):
 		"""

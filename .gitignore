@@ -8,3 +8,8 @@ ExpAssets/EDF/**
 ExpAssets/.versions/**
 ExpAssets/Local
 ExpAssets/Local/**
+/AntiLocalization+Anti.py
+/AntiLocalization+Pro.py
+/Localization+Anti.py
+/Localization+Pro.py
+/Object-based2014.py
